@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { TransactionsStore } from '../store/transactions.store';
@@ -13,11 +17,11 @@ export class AuthService {
   ) {}
 
   async register(email: string, password: string) {
-    const existing = this.users.findByEmail(email);
+    const existing = await this.users.findByEmail(email);
     if (existing) throw new ConflictException('Email already registered');
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = this.users.create({ email, passwordHash });
+    const user = await this.users.create({ email, passwordHash });
     this.tx.seedForUser(user.id);
 
     const token = await this.jwt.signAsync({ sub: user.id });
@@ -25,7 +29,7 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
-    const user = this.users.findByEmail(email);
+    const user = await this.users.findByEmail(email);
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     const ok = await bcrypt.compare(password, user.passwordHash);
@@ -35,5 +39,3 @@ export class AuthService {
     return { token, user: { id: user.id, email: user.email } };
   }
 }
-
-

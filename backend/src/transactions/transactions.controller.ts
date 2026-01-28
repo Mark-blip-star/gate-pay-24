@@ -1,4 +1,12 @@
-import { BadRequestException, Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { TransactionsStore } from '../store/transactions.store';
@@ -24,10 +32,9 @@ export class TransactionsController {
   withdraw(@Req() req: JwtReq, @Body() dto: WithdrawDto) {
     const userId = req.user?.userId!;
     const balance = this.tx.getBalance(userId);
-    if (dto.amount > balance) throw new BadRequestException('Insufficient balance');
+    if (dto.amount > balance)
+      throw new BadRequestException('Insufficient balance');
     const transaction = this.tx.withdraw(userId, dto.amount);
     return { transaction, balance: this.tx.getBalance(userId) };
   }
 }
-
-

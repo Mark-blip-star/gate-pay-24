@@ -17,11 +17,12 @@ export class TransactionsStore {
 
   seedForUser(userId: string) {
     const now = Date.now();
-    const seeds: Array<{ type: 'deposit'; amount: number; offsetMs: number }> = [
-      { type: 'deposit', amount: 120, offsetMs: 1000 * 60 * 60 * 3 },
-      { type: 'deposit', amount: 45, offsetMs: 1000 * 60 * 60 * 24 },
-      { type: 'deposit', amount: 300, offsetMs: 1000 * 60 * 60 * 24 * 7 },
-    ];
+    const seeds: Array<{ type: 'deposit'; amount: number; offsetMs: number }> =
+      [
+        { type: 'deposit', amount: 120, offsetMs: 1000 * 60 * 60 * 3 },
+        { type: 'deposit', amount: 45, offsetMs: 1000 * 60 * 60 * 24 },
+        { type: 'deposit', amount: 300, offsetMs: 1000 * 60 * 60 * 24 * 7 },
+      ];
     for (const s of seeds) {
       this.tx.push({
         id: randomUUID(),
@@ -44,7 +45,10 @@ export class TransactionsStore {
   getBalance(userId: string) {
     return this.tx
       .filter((t) => t.userId === userId)
-      .reduce((acc, t) => acc + (t.type === 'deposit' ? t.amount : -t.amount), 0);
+      .reduce(
+        (acc, t) => acc + (t.type === 'deposit' ? t.amount : -t.amount),
+        0,
+      );
   }
 
   withdraw(userId: string, amount: number) {
@@ -61,5 +65,3 @@ export class TransactionsStore {
     return tr;
   }
 }
-
-

@@ -1,34 +1,46 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { PrismaService } from '../prisma/prisma.service';
 
 export type UserRecord = {
   id: string;
   email: string;
   passwordHash: string;
+  publicKey?: string;
 };
 
 @Injectable()
 export class UsersStore {
-  private users: UserRecord[] = [];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findById(id: string) {
-    return this.users.find((u) => u.id === id) ?? null;
+  async findById(id: string): Promise<UserRecord | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+    return user;
   }
 
-  findByEmail(email: string) {
+  async findByEmail(email: string): Promise<UserRecord | null> {
     const normalized = email.trim().toLowerCase();
-    return this.users.find((u) => u.email.toLowerCase() === normalized) ?? null;
+    const user = await this.prisma.user.findUnique({
+      where: { email: normalized },
+    });
+    return user;
   }
 
-  create(input: { email: string; passwordHash: string }) {
-    const user: UserRecord = {
-      id: randomUUID(),
-      email: input.email.trim().toLowerCase(),
-      passwordHash: input.passwordHash,
-    };
-    this.users.push(user);
+  async create(input: {
+    email: string;
+    passwordHash: string;
+  }): Promise<UserRecord> {
+    const normalized = input.email.trim().toLowerCase();
+    const publicKey = randomUUID();
+    const user = await this.prisma.user.create({
+      data: {
+        email: normalized,
+        passwordHash: input.passwordHash,
+        publicKey,
+      },
+    });
     return user;
   }
 }
-
-
