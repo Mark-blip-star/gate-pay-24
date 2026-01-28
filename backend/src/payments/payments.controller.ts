@@ -1,0 +1,638 @@
+import { Controller, Get, Post, Query, Body, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { PaymentQueryDto } from './dto';
+import { StripeService } from '../stripe/stripe.service';
+
+@Controller('pay')
+export class PaymentsController {
+  constructor(private readonly stripeService: StripeService) {}
+
+  @Get()
+  async getPaymentPage(
+    @Query() query: PaymentQueryDto,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    // Extract and sanitize parameters
+    const params = {
+      public_key: query.public_key || '',
+      account: query.account || '',
+      sum: query.sum || '0.00',
+      desc: query.desc || '',
+      currency: query.currency || 'EUR',
+      sign: query.sign || '',
+      ordernum: query.ordernum || '',
+    };
+
+    // Create Stripe Payment Intent for card payments
+    const amount = parseFloat(params.sum) || 0;
+    const currency = params.currency || 'EUR';
+
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:3000';
+    const returnUrl = protocol + '://' + host + '/pay?success=1';
+
+    let paymentIntentClientSecret = '';
+    try {
+      const paymentIntent = await this.stripeService.createPaymentIntent(
+        amount,
+        currency,
+        {
+          account: params.account,
+          ordernum: params.ordernum,
+          public_key: params.public_key,
+        },
+      );
+      paymentIntentClientSecret = paymentIntent.client_secret || '';
+    } catch (error) {
+      console.error('Failed to create Payment Intent:', error);
+    }
+
+    const stripePublicKey = this.stripeService.getPublicKey();
+
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .payment-card {
+      background: white;
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .title {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+    
+    .amount {
+      font-size: 28px;
+      font-weight: 700;
+      color: #1f2937;
+    }
+    
+    .description {
+      font-size: 14px;
+      color: #6b7280;
+      margin-top: 8px;
+      font-weight: 400;
+    }
+    
+    .content-container {
+      position: relative;
+      transition: height 0.3s;
+    }
+    
+    .payment-methods {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      transition: opacity 0.3s, transform 0.3s;
+      position: absolute;
+      width: 100%;
+      opacity: 1;
+      transform: translateX(0);
+    }
+    
+    .payment-methods.hidden {
+      opacity: 0;
+      transform: translateX(-20px);
+      pointer-events: none;
+    }
+    
+    .payment-tile {
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: white;
+    }
+    
+    .payment-tile:hover {
+      border-color: #ff6b35;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 107, 53, 0.2);
+    }
+    
+    .payment-tile img {
+      width: 60px;
+      height: 60px;
+      object-fit: contain;
+      margin-bottom: 8px;
+    }
+    
+    .payment-tile span {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #4b5563;
+    }
+    
+    .card-form-wrapper {
+      position: absolute;
+      width: 100%;
+      opacity: 0;
+      transform: translateX(20px);
+      pointer-events: none;
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    
+    .card-form-wrapper.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: all;
+    }
+    
+    .back-button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: none;
+      border: none;
+      color: #6b7280;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 8px 0;
+      margin-bottom: 24px;
+      transition: color 0.2s;
+    }
+    
+    .back-button:hover {
+      color: #ff6b35;
+    }
+    
+    .back-arrow {
+      width: 20px;
+      height: 20px;
+      display: inline-block;
+      position: relative;
+    }
+    
+    .back-arrow::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 12px;
+      height: 2px;
+      background: currentColor;
+      transform: translateY(-50%);
+    }
+    
+    .back-arrow::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 8px;
+      height: 8px;
+      border-left: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: translateY(-50%) rotate(45deg);
+    }
+    
+    .card-form {
+      display: block;
+    }
+    
+    #card-element {
+      width: 100%;
+      min-height: 48px;
+      padding: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: white;
+      box-sizing: border-box;
+    }
+    
+    #card-element:focus-within {
+      border-color: #ff6b35;
+      outline: none;
+    }
+    
+    #card-errors {
+      color: #dc2626;
+      font-size: 14px;
+      margin-top: 8px;
+      min-height: 20px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #374151;
+      margin-bottom: 8px;
+    }
+    
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.2s;
+    }
+    
+    .form-group input:focus {
+      outline: none;
+      border-color: #ff6b35;
+    }
+    
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    
+    .submit-btn {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .submit-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+    }
+    
+    .submit-btn:active {
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="payment-card">
+    <div class="header">
+      <div>
+        <h1 class="title">Payment</h1>
+        <div class="description" id="paymentDesc"></div>
+      </div>
+      <div class="amount" id="paymentAmount"></div>
+    </div>
+    
+    <div class="content-container">
+      <div class="payment-methods" id="paymentMethods">
+        <div class="payment-tile" data-method="google-pay">
+          <img src="/icons/google-pay.png" alt="Google Pay">
+          <span>Google Pay</span>
+        </div>
+        <div class="payment-tile" data-method="apple-pay">
+          <img src="/icons/apple-logo.png" alt="Apple Pay">
+          <span>Apple Pay</span>
+        </div>
+        <div class="payment-tile" data-method="visa">
+          <img src="/icons/visa.png" alt="Visa">
+          <span>Visa</span>
+        </div>
+        <div class="payment-tile" data-method="mastercard">
+          <img src="/icons/mastercard.png" alt="MasterCard">
+          <span>MasterCard</span>
+        </div>
+      </div>
+      
+      <div class="card-form-wrapper" id="cardFormWrapper">
+        <button class="back-button" id="backButton">
+          <span class="back-arrow"></span>
+          <span>Back to payment methods</span>
+        </button>
+        <div class="card-form">
+          <form id="paymentForm">
+            <div class="form-group">
+              <label for="cardNumber">Card Number</label>
+              <input type="text" id="cardNumber" name="cardNumber" placeholder="1234 5678 9012 3456" maxlength="19">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="expiry">Expiry</label>
+                <input type="text" id="expiry" name="expiry" placeholder="MM/YY" maxlength="5">
+              </div>
+              <div class="form-group">
+                <label for="cvc">CVC</label>
+                <input type="text" id="cvc" name="cvc" placeholder="123" maxlength="4">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="name">Cardholder Name</label>
+              <input type="text" id="name" name="name" placeholder="John Doe">
+            </div>
+            <button type="submit" class="submit-btn" id="submitBtn">Pay</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="https://js.stripe.com/v3/"></script>
+  <script>
+    // Stripe configuration
+    const stripePublicKey = '${stripePublicKey}';
+    const stripe = stripePublicKey ? Stripe(stripePublicKey) : null;
+    const paymentIntentClientSecret = '${paymentIntentClientSecret}';
+    const paymentReturnUrl = ${JSON.stringify(returnUrl)};
+    
+    // Payment parameters from server
+    const paymentParams = ${JSON.stringify(params)};
+    let selectedPaySystem = null;
+    let stripeElements = null;
+    let cardElement = null;
+    
+    const paymentMethods = document.getElementById('paymentMethods');
+    const cardFormWrapper = document.getElementById('cardFormWrapper');
+    const backButton = document.getElementById('backButton');
+    const contentContainer = document.querySelector('.content-container');
+    const paymentAmountEl = document.getElementById('paymentAmount');
+    const paymentDescEl = document.getElementById('paymentDesc');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    // Initialize payment display
+    paymentAmountEl.textContent = paymentParams.sum + ' ' + paymentParams.currency;
+    paymentDescEl.textContent = paymentParams.desc;
+    
+    // Map payment methods to Pay4Bit paySystem values
+    const paySystemMap = {
+      'google-pay': null, // Will use Stripe wallet iframe
+      'apple-pay': null, // Will use Stripe wallet iframe
+      'visa': 'visa',
+      'mastercard': 'mastercard'
+    };
+    
+    // Function to sync container height with active block
+    function syncHeight() {
+      const activeEl = cardFormWrapper.classList.contains('active')
+        ? cardFormWrapper
+        : paymentMethods;
+
+      const h = activeEl.scrollHeight;
+      // +10 щоб не було "впритик"
+      contentContainer.style.height = (h + 10) + 'px';
+    }
+    
+    // Call on startup
+    syncHeight();
+    window.addEventListener('resize', syncHeight);
+    
+    // Handle payment method tile clicks
+    document.querySelectorAll('.payment-tile').forEach(tile => {
+      tile.addEventListener('click', function() {
+        const method = this.dataset.method;
+        selectedPaySystem = paySystemMap[method];
+        
+        if (method === 'google-pay' || method === 'apple-pay') {
+          // Initialize Stripe Payment Request Button for Google Pay / Apple Pay
+          if (stripe && paymentIntentClientSecret) {
+            initializeWalletPayment(method);
+          } else {
+            alert('Payment system not available');
+          }
+        } else if (method === 'visa' || method === 'mastercard') {
+          // Hide payment methods and show card form
+          paymentMethods.classList.add('hidden');
+          setTimeout(() => {
+            cardFormWrapper.classList.add('active');
+            initializeCardPayment();
+            syncHeight();
+          }, 150);
+        }
+      });
+    });
+    
+    // Handle back button click
+    backButton.addEventListener('click', function() {
+      cardFormWrapper.classList.remove('active');
+      setTimeout(() => {
+        paymentMethods.classList.remove('hidden');
+        // Reset form
+        document.getElementById('paymentForm').reset();
+        syncHeight();
+      }, 300);
+    });
+    
+    // Format card number input
+    document.getElementById('cardNumber').addEventListener('input', function(e) {
+      let value = e.target.value.replace(/\\s/g, '');
+      let formattedValue = value.match(/.{1,4}/g)?.join(' ') || value;
+      e.target.value = formattedValue;
+    });
+    
+    // Format expiry input
+    document.getElementById('expiry').addEventListener('input', function(e) {
+      let value = e.target.value.replace(/\\D/g, '');
+      if (value.length >= 2) {
+        value = value.substring(0, 2) + '/' + value.substring(2, 4);
+      }
+      e.target.value = value;
+    });
+    
+    // Only allow numbers for CVC
+    document.getElementById('cvc').addEventListener('input', function(e) {
+      e.target.value = e.target.value.replace(/\\D/g, '');
+    });
+    
+    // Initialize Stripe Elements for card payment
+    function initializeCardPayment() {
+      if (!stripe || !paymentIntentClientSecret) {
+        console.error('Stripe not initialized');
+        return;
+      }
+
+      // Replace manual form with Stripe Elements
+      const form = document.getElementById('paymentForm');
+      const formHTML = form.innerHTML;
+      
+      // Create Stripe Elements container
+      form.innerHTML = '<div id="card-element"></div><div id="card-errors" role="alert"></div>';
+      
+      stripeElements = stripe.elements({
+        clientSecret: paymentIntentClientSecret,
+      });
+
+      cardElement = stripeElements.create('card', {
+        style: {
+          base: {
+            fontSize: '16px',
+            color: '#1f2937',
+            '::placeholder': {
+              color: '#9ca3af',
+            },
+          },
+        },
+      });
+
+      cardElement.mount('#card-element');
+
+      cardElement.on('change', ({error}) => {
+        const displayError = document.getElementById('card-errors');
+        if (error) {
+          displayError.textContent = error.message;
+        } else {
+          displayError.textContent = '';
+        }
+      });
+
+      // Add submit button back
+      const submitBtnContainer = document.createElement('div');
+      submitBtnContainer.innerHTML = '<button type="submit" class="submit-btn" id="submitBtn">Pay ' + paymentParams.sum + ' ' + paymentParams.currency + '</button>';
+      form.appendChild(submitBtnContainer);
+    }
+
+    // Initialize Google Pay / Apple Pay / Link with Express Checkout Element
+    async function initializeWalletPayment(method) {
+      if (!stripe || !paymentIntentClientSecret) {
+        alert('Payment system not available');
+        return;
+      }
+
+      const amount = parseFloat(paymentParams.sum) || 0;
+      const currency = (paymentParams.currency || 'EUR').toLowerCase();
+      const amountInCents = Math.round(amount * 100);
+
+      // Express Checkout Element uses elements with mode, amount, currency (per Stripe migration)
+      const walletElements = stripe.elements({
+        mode: 'payment',
+        amount: amountInCents,
+        currency: currency,
+      });
+
+      const expressCheckoutElement = walletElements.create('expressCheckout', {
+        emailRequired: true,
+      });
+
+      const container = document.createElement('div');
+      container.id = 'express-checkout-container';
+      container.style.cssText = 'margin-top: 20px; width: 100%;';
+      const cardForm = document.querySelector('.card-form');
+      if (cardForm && cardForm.querySelector('#wallet-payment-container')) {
+        cardForm.querySelector('#wallet-payment-container').remove();
+      }
+      const existingExpress = document.getElementById('express-checkout-container');
+      if (existingExpress) existingExpress.remove();
+      document.querySelector('.payment-card').appendChild(container);
+
+      expressCheckoutElement.mount('#express-checkout-container');
+
+      expressCheckoutElement.on('confirm', async (event) => {
+        const { error } = await stripe.confirmPayment({
+          elements: walletElements,
+          clientSecret: paymentIntentClientSecret,
+          confirmParams: {
+            return_url: paymentReturnUrl,
+          },
+        });
+        if (error) {
+          alert('Payment failed: ' + (error.message || 'Unknown error'));
+        }
+      });
+    }
+
+    // Handle form submission with Stripe
+    document.getElementById('paymentForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      if (!stripe || !cardElement || !paymentIntentClientSecret) {
+        alert('Payment system not initialized');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Processing...';
+
+      const {error, paymentIntent} = await stripe.confirmCardPayment(
+        paymentIntentClientSecret,
+        {
+          payment_method: {
+            card: cardElement,
+          },
+        }
+      );
+
+      if (error) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Pay ' + paymentParams.sum + ' ' + paymentParams.currency;
+        alert('Payment failed: ' + error.message);
+      } else if (paymentIntent && paymentIntent.status === 'succeeded') {
+        alert('Payment successful!');
+        // Here you would typically redirect to success page or notify Pay4Bit
+        console.log('Payment Intent succeeded:', paymentIntent.id);
+      }
+    });
+    
+    // Update submit button text with amount
+    submitBtn.textContent = 'Pay ' + paymentParams.sum + ' ' + paymentParams.currency;
+  </script>
+</body>
+</html>
+    `;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  }
+
+  /**
+   * Create Payment Intent endpoint (if needed separately)
+   */
+  @Post('create-intent')
+  async createPaymentIntent(
+    @Body()
+    body: {
+      amount: number;
+      currency: string;
+      metadata?: Record<string, string>;
+    },
+  ) {
+    const paymentIntent = await this.stripeService.createPaymentIntent(
+      body.amount,
+      body.currency,
+      body.metadata,
+    );
+    return {
+      clientSecret: paymentIntent.client_secret,
+    };
+  }
+}
