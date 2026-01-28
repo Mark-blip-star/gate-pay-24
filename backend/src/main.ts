@@ -12,11 +12,12 @@ async function bootstrap() {
     origin: true,
   });
 
-  app.useStaticAssets(join(__dirname, '..', 'public'));
+  app.useStaticAssets(join(process.cwd(), 'public'), { prefix: '/' });
 
   app.setGlobalPrefix('api', {
     exclude: [
       { path: 'pay', method: RequestMethod.GET },
+      { path: 'pay', method: RequestMethod.POST },
       { path: 'icons/*path', method: RequestMethod.GET },
       { path: 'stripe/webhook', method: RequestMethod.POST },
     ],
