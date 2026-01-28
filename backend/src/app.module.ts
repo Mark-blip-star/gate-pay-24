@@ -1,3 +1,4 @@
+import { UserSettingsController } from './userSettings/userSettings.controller';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -19,7 +20,12 @@ import { TransactionsController } from './transactions/transactions.controller';
     PaymentsModule,
     StripeModule,
   ],
-  controllers: [AppController, MeController, TransactionsController],
+  controllers: [
+    AppController,
+    UserSettingsController,
+    MeController,
+    TransactionsController,
+  ],
   providers: [AppService],
 })
 export class AppModule {}

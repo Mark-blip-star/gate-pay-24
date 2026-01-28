@@ -16,11 +16,11 @@ model User {
   publicKey    String   @unique
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  account      Account?
+  userSettings UserSettings?
   payments     Payment[]
 }
 
-model Account {
+model UserSettings {
   id          String   @id @default(uuid())
   userId      String   @unique
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -28,6 +28,8 @@ model Account {
   redirectUrl String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@map("userSettings")
 }
 
 model Payment {
