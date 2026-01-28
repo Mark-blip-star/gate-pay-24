@@ -25,7 +25,10 @@ export class AuthService {
     this.tx.seedForUser(user.id);
 
     const token = await this.jwt.signAsync({ sub: user.id });
-    return { token, user: { id: user.id, email: user.email } };
+    return {
+      token,
+      user: { id: user.id, email: user.email, publicKey: user.publicKey },
+    };
   }
 
   async login(email: string, password: string) {
@@ -36,6 +39,9 @@ export class AuthService {
     if (!ok) throw new UnauthorizedException('Invalid credentials');
 
     const token = await this.jwt.signAsync({ sub: user.id });
-    return { token, user: { id: user.id, email: user.email } };
+    return {
+      token,
+      user: { id: user.id, email: user.email, publicKey: user.publicKey },
+    };
   }
 }

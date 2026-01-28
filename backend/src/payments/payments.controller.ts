@@ -1,11 +1,41 @@
 import { Controller, Get, Post, Query, Body, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { PaymentQueryDto } from './dto';
+import { PaymentPostBodyDto, PaymentQueryDto } from './dto';
 import { StripeService } from '../stripe/stripe.service';
 
 @Controller('pay')
 export class PaymentsController {
   constructor(private readonly stripeService: StripeService) {}
+
+  @Post()
+  async postPayRedirect(
+    @Body() body: PaymentPostBodyDto,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const params = new URLSearchParams();
+    if (body.public_key != null && body.public_key !== '')
+      params.set('public_key', body.public_key);
+    if (body.account != null && body.account !== '')
+      params.set('account', body.account);
+    if (body.sum != null && body.sum !== '') params.set('sum', body.sum);
+    if (body.desc != null && body.desc !== '') params.set('desc', body.desc);
+    if (body.currency != null && body.currency !== '')
+      params.set('currency', body.currency);
+    if (body.sign != null && body.sign !== '') params.set('sign', body.sign);
+    if (body.ordernum != null && body.ordernum !== '')
+      params.set('ordernum', body.ordernum);
+    if (body.paySystem != null && body.paySystem !== '')
+      params.set('paySystem', body.paySystem);
+
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:3000';
+    const baseUrl = `${protocol}://${host}/pay`;
+    const queryString = params.toString();
+    const redirectUrl = queryString ? `${baseUrl}?${queryString}` : baseUrl;
+
+    res.redirect(303, redirectUrl);
+  }
 
   @Get()
   async getPaymentPage(
@@ -494,6 +524,7 @@ export class PaymentsController {
       });
 
       cardElement = stripeElements.create('card', {
+        hidePostalCode: true,
         style: {
           base: {
             fontSize: '16px',

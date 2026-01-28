@@ -16,6 +16,6 @@ export class MeController {
     if (!userId) return null;
     const user = await this.users.findById(userId);
     if (!user) return null;
-    return { id: user.id, email: user.email };
+    return { id: user.id, email: user.email, publicKey: user.publicKey };
   }
 }
