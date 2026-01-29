@@ -51,6 +51,18 @@ export class StripeService {
   }
 
   /**
+   * Update Payment Intent metadata (e.g. paymentType set by user on client).
+   */
+  async updatePaymentIntentMetadata(
+    paymentIntentId: string,
+    metadata: Record<string, string>,
+  ): Promise<Stripe.PaymentIntent> {
+    return await this.stripe.paymentIntents.update(paymentIntentId, {
+      metadata,
+    });
+  }
+
+  /**
    * Retrieve Payment Intent by ID
    */
   async getPaymentIntent(

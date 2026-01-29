@@ -2,11 +2,15 @@ import { Controller, Post, Req, Res, Headers } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { RawBodyRequest } from '@nestjs/common';
 import { StripeService } from './stripe.service';
+import { PrismaService } from '../prisma/prisma.service';
 import Stripe from 'stripe';
 
 @Controller('stripe')
 export class StripeController {
-  constructor(private readonly stripeService: StripeService) {}
+  constructor(
+    private readonly stripeService: StripeService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /**
    * Webhook endpoint for Stripe events
@@ -37,22 +41,110 @@ export class StripeController {
       event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
     } catch (err) {
       console.error('Webhook signature verification failed:', err);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
+      return res
+        .status(400)
+        .send(
+          `Webhook Error: ${err instanceof Error ? err.message : 'Unknown'}`,
+        );
     }
 
     // Handle the event
     switch (event.type) {
-      case 'payment_intent.succeeded':
+      case 'payment_intent.succeeded': {
         const paymentIntent = event.data.object;
-        console.log('PaymentIntent succeeded:', paymentIntent.id);
-        // Here you can update your database, notify Pay4Bit, etc.
-        // The metadata contains payment info from Pay4Bit
+        const existing = await this.prisma.payment.findFirst({
+          where: { stripePaymentIntentId: paymentIntent.id },
+        });
+        if (existing) {
+          await this.prisma.payment.update({
+            where: { id: existing.id },
+            data: {
+              status: 'completed',
+              desc: paymentIntent.metadata?.desc ?? existing.desc,
+              paymentType:
+                paymentIntent.metadata?.paymentType ?? existing.paymentType,
+            },
+          });
+        } else {
+          const publicKey = paymentIntent.metadata?.public_key;
+          if (!publicKey) {
+            console.warn(
+              'payment_intent.succeeded: missing metadata.public_key',
+            );
+            break;
+          }
+          const user = await this.prisma.user.findUnique({
+            where: { publicKey },
+          });
+          if (!user) {
+            console.warn(
+              'payment_intent.succeeded: no user for public_key',
+              publicKey,
+            );
+            break;
+          }
+          const amountCents = paymentIntent.amount ?? 0;
+          const amountDecimal = amountCents / 100;
+          await this.prisma.payment.create({
+            data: {
+              userId: user.id,
+              stripePaymentIntentId: paymentIntent.id,
+              amount: amountDecimal,
+              currency: paymentIntent.currency ?? 'eur',
+              status: 'completed',
+              payAccount: paymentIntent.metadata?.account ?? null,
+              ordernum: paymentIntent.metadata?.ordernum ?? null,
+              desc: paymentIntent.metadata?.desc ?? null,
+              paymentType: paymentIntent.metadata?.paymentType ?? null,
+            },
+          });
+        }
         break;
+      }
 
-      case 'payment_intent.payment_failed':
+      case 'payment_intent.payment_failed': {
         const failedPayment = event.data.object;
-        console.log('PaymentIntent failed:', failedPayment.id);
+        const existingFailed = await this.prisma.payment.findFirst({
+          where: { stripePaymentIntentId: failedPayment.id },
+        });
+        if (existingFailed) {
+          await this.prisma.payment.update({
+            where: { id: existingFailed.id },
+            data: {
+              status: 'failed',
+              desc: failedPayment.metadata?.desc ?? existingFailed.desc,
+              paymentType:
+                failedPayment.metadata?.paymentType ??
+                existingFailed.paymentType,
+            },
+          });
+        } else {
+          const publicKey = failedPayment.metadata?.public_key;
+          if (publicKey) {
+            const user = await this.prisma.user.findUnique({
+              where: { publicKey },
+            });
+            if (user) {
+              const amountCents = failedPayment.amount ?? 0;
+              const amountDecimal = amountCents / 100;
+              await this.prisma.payment.create({
+                data: {
+                  userId: user.id,
+                  stripePaymentIntentId: failedPayment.id,
+                  amount: amountDecimal,
+                  currency: failedPayment.currency ?? 'eur',
+                  status: 'failed',
+                  payAccount: failedPayment.metadata?.account ?? null,
+                  ordernum: failedPayment.metadata?.ordernum ?? null,
+                  desc: failedPayment.metadata?.desc ?? null,
+                  paymentType: failedPayment.metadata?.paymentType ?? null,
+                },
+              });
+            }
+          }
+        }
         break;
+      }
 
       default:
         console.log(`Unhandled event type: ${event.type}`);
