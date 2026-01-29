@@ -68,3 +68,12 @@ export class PaymentPostBodyDto {
   @IsString()
   paySystem?: string;
 }
+
+/** Body for POST /pay/set-method — set selected payment type before confirm */
+export class SetPaymentMethodDto {
+  @IsString()
+  paymentIntentId!: string;
+
+  @IsString()
+  paymentType!: string;
+}

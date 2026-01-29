@@ -1,11 +1,19 @@
 import { Controller, Get, Post, Query, Body, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { PaymentPostBodyDto, PaymentQueryDto } from './dto';
+import {
+  PaymentPostBodyDto,
+  PaymentQueryDto,
+  SetPaymentMethodDto,
+} from './dto';
 import { StripeService } from '../stripe/stripe.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('pay')
 export class PaymentsController {
-  constructor(private readonly stripeService: StripeService) {}
+  constructor(
+    private readonly stripeService: StripeService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Post()
   async postPayRedirect(
@@ -45,7 +53,7 @@ export class PaymentsController {
   ) {
     // Extract and sanitize parameters
     const params = {
-      public_key: query.public_key || '',
+      public_key: (query.public_key || '').trim(),
       account: query.account || '',
       sum: query.sum || '0.00',
       desc: query.desc || '',
@@ -53,6 +61,27 @@ export class PaymentsController {
       sign: query.sign || '',
       ordernum: query.ordernum || '',
     };
+
+    // Check that public_key exists in DB before continuing payment flow
+    if (!params.public_key) {
+      res
+        .status(400)
+        .send(
+          '<!DOCTYPE html><html><body><h1>Bad Request</h1><p>Missing public_key.</p></body></html>',
+        );
+      return;
+    }
+    const userByPublicKey = await this.prisma.user.findUnique({
+      where: { publicKey: params.public_key },
+    });
+    if (!userByPublicKey) {
+      res
+        .status(403)
+        .send(
+          '<!DOCTYPE html><html><body><h1>Forbidden</h1><p>Invalid public_key.</p></body></html>',
+        );
+      return;
+    }
 
     // Create Stripe Payment Intent for card payments
     const amount = parseFloat(params.sum) || 0;
@@ -63,6 +92,7 @@ export class PaymentsController {
     const returnUrl = protocol + '://' + host + '/pay?success=1';
 
     let paymentIntentClientSecret = '';
+    let paymentIntentId = '';
     try {
       const paymentIntent = await this.stripeService.createPaymentIntent(
         amount,
@@ -71,9 +101,23 @@ export class PaymentsController {
           account: params.account,
           ordernum: params.ordernum,
           public_key: params.public_key,
+          desc: params.desc,
         },
       );
       paymentIntentClientSecret = paymentIntent.client_secret || '';
+      paymentIntentId = paymentIntent.id;
+      await this.prisma.payment.create({
+        data: {
+          userId: userByPublicKey.id,
+          stripePaymentIntentId: paymentIntent.id,
+          amount,
+          currency: currency.toUpperCase(),
+          status: 'pending',
+          payAccount: params.account || null,
+          ordernum: params.ordernum || null,
+          desc: params.desc || null,
+        },
+      });
     } catch (error) {
       console.error('Failed to create Payment Intent:', error);
     }
@@ -335,6 +379,15 @@ export class PaymentsController {
     .submit-btn:active {
       transform: translateY(0);
     }
+    
+    .submit-btn:disabled,
+    .submit-btn[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -409,7 +462,9 @@ export class PaymentsController {
     
     // Payment parameters from server
     const paymentParams = ${JSON.stringify(params)};
+    const paymentIntentId = ${JSON.stringify(paymentIntentId)};
     let selectedPaySystem = null;
+    let cardBrandMatches = false;
     let stripeElements = null;
     let cardElement = null;
     
@@ -425,10 +480,16 @@ export class PaymentsController {
     paymentAmountEl.textContent = paymentParams.sum + ' ' + paymentParams.currency;
     paymentDescEl.textContent = paymentParams.desc;
     
-    // Map payment methods to Pay4Bit paySystem values
+    // Map payment methods to Pay4Bit paySystem values and paymentType for API
     const paySystemMap = {
-      'google-pay': null, // Will use Stripe wallet iframe
-      'apple-pay': null, // Will use Stripe wallet iframe
+      'google-pay': null,
+      'apple-pay': null,
+      'visa': 'visa',
+      'mastercard': 'mastercard'
+    };
+    const methodToPaymentType = {
+      'google-pay': 'googlepay',
+      'apple-pay': 'applepay',
       'visa': 'visa',
       'mastercard': 'mastercard'
     };
@@ -448,11 +509,23 @@ export class PaymentsController {
     syncHeight();
     window.addEventListener('resize', syncHeight);
     
+    // Notify server of selected payment type (for metadata and DB)
+    function setPaymentTypeOnServer(paymentType) {
+      if (!paymentIntentId) return;
+      fetch('/api/pay/set-method', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentIntentId, paymentType }),
+      }).catch(function() {});
+    }
+    
     // Handle payment method tile clicks
     document.querySelectorAll('.payment-tile').forEach(tile => {
       tile.addEventListener('click', function() {
         const method = this.dataset.method;
         selectedPaySystem = paySystemMap[method];
+        const paymentType = methodToPaymentType[method];
+        if (paymentType) setPaymentTypeOnServer(paymentType);
         
         if (method === 'google-pay' || method === 'apple-pay') {
           // Initialize Stripe Payment Request Button for Google Pay / Apple Pay
@@ -538,18 +611,36 @@ export class PaymentsController {
 
       cardElement.mount('#card-element');
 
-      cardElement.on('change', ({error}) => {
+      cardElement.on('change', (event) => {
         const displayError = document.getElementById('card-errors');
-        if (error) {
-          displayError.textContent = error.message;
-        } else {
-          displayError.textContent = '';
+        const payBtn = document.getElementById('submitBtn');
+        if (event.error) {
+          displayError.textContent = event.error.message;
+          if (payBtn) payBtn.disabled = true;
+          return;
         }
+        // If user chose Visa or Mastercard, accept only that brand
+        if (selectedPaySystem === 'visa' || selectedPaySystem === 'mastercard') {
+          const brand = (event.brand || '').toLowerCase();
+          if (brand && brand !== selectedPaySystem) {
+            displayError.textContent = selectedPaySystem === 'visa'
+              ? 'Please use a Visa card.'
+              : 'Please use a Mastercard.';
+            if (payBtn) payBtn.disabled = true;
+            cardBrandMatches = false;
+            return;
+          }
+          cardBrandMatches = !!brand;
+        } else {
+          cardBrandMatches = true;
+        }
+        displayError.textContent = '';
+        if (payBtn) payBtn.disabled = false;
       });
 
-      // Add submit button back
+      // Add submit button back (disabled until card is valid and brand matches)
       const submitBtnContainer = document.createElement('div');
-      submitBtnContainer.innerHTML = '<button type="submit" class="submit-btn" id="submitBtn">Pay ' + paymentParams.sum + ' ' + paymentParams.currency + '</button>';
+      submitBtnContainer.innerHTML = '<button type="submit" class="submit-btn" id="submitBtn" disabled>Pay ' + paymentParams.sum + ' ' + paymentParams.currency + '</button>';
       form.appendChild(submitBtnContainer);
     }
 
@@ -610,9 +701,16 @@ export class PaymentsController {
         alert('Payment system not initialized');
         return;
       }
+      if ((selectedPaySystem === 'visa' || selectedPaySystem === 'mastercard') && !cardBrandMatches) {
+        alert(selectedPaySystem === 'visa' ? 'Please use a Visa card.' : 'Please use a Mastercard.');
+        return;
+      }
 
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Processing...';
+      const payBtn = document.getElementById('submitBtn');
+      if (payBtn) {
+        payBtn.disabled = true;
+        payBtn.textContent = 'Processing...';
+      }
 
       const {error, paymentIntent} = await stripe.confirmCardPayment(
         paymentIntentClientSecret,
@@ -624,17 +722,17 @@ export class PaymentsController {
       );
 
       if (error) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Pay ' + paymentParams.sum + ' ' + paymentParams.currency;
+        const btn = document.getElementById('submitBtn');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Pay ' + paymentParams.sum + ' ' + paymentParams.currency;
+        }
         alert('Payment failed: ' + error.message);
       } else if (paymentIntent && paymentIntent.status === 'succeeded') {
         alert('Payment successful!');
-        // Here you would typically redirect to success page or notify Pay4Bit
-        console.log('Payment Intent succeeded:', paymentIntent.id);
       }
     });
     
-    // Update submit button text with amount
     submitBtn.textContent = 'Pay ' + paymentParams.sum + ' ' + paymentParams.currency;
   </script>
 </body>
@@ -643,6 +741,28 @@ export class PaymentsController {
 
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
+  }
+
+  /**
+   * Set selected payment type (visa, mastercard, applepay, googlepay) before user confirms.
+   * Called from payment page when user clicks a payment method tile.
+   */
+  @Post('set-method')
+  async setPaymentMethod(
+    @Body() body: SetPaymentMethodDto,
+  ): Promise<{ ok: boolean }> {
+    const { paymentIntentId, paymentType } = body;
+    const pi = await this.stripeService.getPaymentIntent(paymentIntentId);
+    const metadata = { ...(pi.metadata || {}), paymentType };
+    await this.stripeService.updatePaymentIntentMetadata(
+      paymentIntentId,
+      metadata,
+    );
+    await this.prisma.payment.updateMany({
+      where: { stripePaymentIntentId: paymentIntentId },
+      data: { paymentType },
+    });
+    return { ok: true };
   }
 
   /**
