@@ -5,10 +5,12 @@ import {
   Get,
   Post,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
+import { PrismaService } from '../prisma/prisma.service';
 import { TransactionsStore } from '../store/transactions.store';
 import { WithdrawDto } from './dto';
 
@@ -16,21 +18,37 @@ type JwtReq = Request & { user?: { userId: string } };
 
 @Controller()
 export class TransactionsController {
-  constructor(private readonly tx: TransactionsStore) {}
+  constructor(
+    private readonly tx: TransactionsStore,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @UseGuards(AuthGuard('jwt'))
   @Get('transactions')
-  list(@Req() req: JwtReq) {
-    const userId = req.user?.userId!;
-    const items = this.tx.listForUser(userId);
-    const balance = this.tx.getBalance(userId);
-    return { items, balance };
+  async list(@Req() req: JwtReq) {
+    const userId = req.user?.userId;
+    if (!userId) throw new UnauthorizedException('Not authenticated');
+    const payments = await this.prisma.payment.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    const items = payments.map((p) => ({
+      id: p.id,
+      type: 'deposit' as const,
+      amount: Number(p.amount),
+      currency: (p.currency ?? 'USD').toUpperCase(),
+      status: p.status,
+      createdAt: p.createdAt.toISOString(),
+      paymentType: p.paymentType ?? undefined,
+    }));
+    return { items, balance: 0 };
   }
 
   @UseGuards(AuthGuard('jwt'))
   @Post('withdraw')
   withdraw(@Req() req: JwtReq, @Body() dto: WithdrawDto) {
-    const userId = req.user?.userId!;
+    const userId = req.user?.userId;
+    if (!userId) throw new UnauthorizedException('Not authenticated');
     const balance = this.tx.getBalance(userId);
     if (dto.amount > balance)
       throw new BadRequestException('Insufficient balance');
