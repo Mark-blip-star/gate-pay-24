@@ -11,12 +11,11 @@ export class MeController {
 
   @UseGuards(AuthGuard('jwt'))
   @Get('me')
-  me(@Req() req: JwtReq) {
+  async me(@Req() req: JwtReq) {
     const userId = req.user?.userId;
-    const user = userId ? this.users.findById(userId) : null;
+    if (!userId) return null;
+    const user = await this.users.findById(userId);
     if (!user) return null;
-    return { id: user.id, email: user.email };
+    return { id: user.id, email: user.email, publicKey: user.publicKey };
   }
 }
-
-

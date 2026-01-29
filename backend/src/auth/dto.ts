@@ -8,5 +8,3 @@ export class EmailPasswordDto {
   @MinLength(6)
   password!: string;
 }
-
-

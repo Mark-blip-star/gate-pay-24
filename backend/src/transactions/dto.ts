@@ -5,5 +5,3 @@ export class WithdrawDto {
   @Min(0.01)
   amount!: number;
 }
-
-
