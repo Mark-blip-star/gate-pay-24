@@ -44,9 +44,10 @@ export type Transaction = {
   id: string;
   type: "deposit" | "withdraw";
   amount: number;
-  currency: "USD";
-  status: "completed";
+  currency: string;
+  status: string;
   createdAt: string;
+  paymentType?: string;
 };
 
 export async function apiRegister(email: string, password: string) {

@@ -32,10 +32,10 @@ const settingsSchema = z.object({
 type WithdrawForm = z.infer<typeof withdrawSchema>;
 type SettingsForm = z.infer<typeof settingsSchema>;
 
-function formatMoney(amount: number) {
+function formatMoney(amount: number, currency = "USD") {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency,
   }).format(amount);
 }
 
@@ -78,8 +78,10 @@ export function DashboardPage() {
       const res = await apiTransactions();
       setItems(res.items);
       setBalance(res.balance);
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to load transactions");
+    } catch (e: unknown) {
+      setError(
+        (e as { message?: string })?.message ?? "Failed to load transactions",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -87,7 +89,6 @@ export function DashboardPage() {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -139,8 +140,10 @@ export function DashboardPage() {
       setItems((prev) => [res.transaction, ...prev]);
       reset({ amount: values.amount });
       setShowWithdraw(false);
-    } catch (e: any) {
-      setFormError("root", { message: e?.message ?? "Withdraw failed" });
+    } catch (e: unknown) {
+      setFormError("root", {
+        message: (e as { message?: string })?.message ?? "Withdraw failed",
+      });
     }
   });
 
@@ -150,10 +153,10 @@ export function DashboardPage() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <div className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-2xl bg-indigo-500/20 text-indigo-200">
-              GP
+              LP
             </div>
             <div>
-              <div className="text-lg font-bold leading-tight">GatePay24</div>
+              <div className="text-lg font-bold leading-tight">LynxPay</div>
               <div className="text-xs text-white/60">
                 Your transactions dashboard
               </div>
@@ -272,10 +275,31 @@ export function DashboardPage() {
                           }
                         >
                           {t.type === "withdraw" ? "-" : "+"}
-                          {formatMoney(t.amount)}
+                          {formatMoney(t.amount, t.currency)}
                         </span>
                       </td>
-                      <td className="px-5 py-4 text-white/70">{t.status}</td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-1 text-xs font-semibold",
+                            (t.status === "completed" ||
+                              t.status === "succeeded") &&
+                              "bg-emerald-500/15 text-emerald-200",
+                            t.status === "pending" &&
+                              "bg-amber-500/15 text-amber-200",
+                            t.status === "failed" &&
+                              "bg-rose-500/15 text-rose-200",
+                            ![
+                              "completed",
+                              "succeeded",
+                              "pending",
+                              "failed",
+                            ].includes(t.status) && "bg-white/10 text-white/70",
+                          )}
+                        >
+                          {t.status}
+                        </span>
+                      </td>
                     </tr>
                   ))
                 ) : (
