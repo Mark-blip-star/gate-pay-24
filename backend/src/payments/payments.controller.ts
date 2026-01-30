@@ -644,22 +644,16 @@ export class PaymentsController {
       form.appendChild(submitBtnContainer);
     }
 
-    // Initialize Google Pay / Apple Pay / Link with Express Checkout Element
+    // Initialize Google Pay / Apple Pay with Express Checkout Element (bound to existing Payment Intent)
     async function initializeWalletPayment(method) {
       if (!stripe || !paymentIntentClientSecret) {
         alert('Payment system not available');
         return;
       }
 
-      const amount = parseFloat(paymentParams.sum) || 0;
-      const currency = (paymentParams.currency || 'EUR').toLowerCase();
-      const amountInCents = Math.round(amount * 100);
-
-      // Express Checkout Element uses elements with mode, amount, currency (per Stripe migration)
+      // Bind Elements to our existing Payment Intent so wallet buttons use the same PI
       const walletElements = stripe.elements({
-        mode: 'payment',
-        amount: amountInCents,
-        currency: currency,
+        clientSecret: paymentIntentClientSecret,
       });
 
       const expressCheckoutElement = walletElements.create('expressCheckout', {
@@ -680,6 +674,11 @@ export class PaymentsController {
       expressCheckoutElement.mount('#express-checkout-container');
 
       expressCheckoutElement.on('confirm', async (event) => {
+        const { error: submitError } = await walletElements.submit();
+        if (submitError) {
+          alert('Payment failed: ' + (submitError.message || 'Unknown error'));
+          return;
+        }
         const { error } = await stripe.confirmPayment({
           elements: walletElements,
           clientSecret: paymentIntentClientSecret,
