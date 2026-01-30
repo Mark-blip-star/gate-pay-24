@@ -252,6 +252,27 @@ export class PaymentsController {
       pointer-events: all;
     }
     
+    .wallet-form-wrapper {
+      position: absolute;
+      width: 100%;
+      opacity: 0;
+      transform: translateX(20px);
+      pointer-events: none;
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    
+    .wallet-form-wrapper.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: all;
+    }
+    
+    #express-checkout-container {
+      width: 100%;
+      max-width: 750px;
+      margin-top: 12px;
+    }
+    
     .back-button {
       display: flex;
       align-items: center;
@@ -402,13 +423,9 @@ export class PaymentsController {
     
     <div class="content-container">
       <div class="payment-methods" id="paymentMethods">
-        <div class="payment-tile" data-method="google-pay">
-          <img src="/icons/google-pay.png" alt="Google Pay">
-          <span>Google Pay</span>
-        </div>
-        <div class="payment-tile" data-method="apple-pay">
-          <img src="/icons/apple-logo.png" alt="Apple Pay">
-          <span>Apple Pay</span>
+        <div class="payment-tile" data-method="wallet">
+          <img src="/icons/wallet.png" alt="Wallet">
+          <span>Wallet</span>
         </div>
         <div class="payment-tile" data-method="visa">
           <img src="/icons/visa.png" alt="Visa">
@@ -420,8 +437,16 @@ export class PaymentsController {
         </div>
       </div>
       
+      <div class="wallet-form-wrapper" id="walletFormWrapper">
+        <button type="button" class="back-button" id="backFromWalletButton">
+          <span class="back-arrow"></span>
+          <span>Back to payment methods</span>
+        </button>
+        <div id="express-checkout-container"></div>
+      </div>
+      
       <div class="card-form-wrapper" id="cardFormWrapper">
-        <button class="back-button" id="backButton">
+        <button type="button" class="back-button" id="backButton">
           <span class="back-arrow"></span>
           <span>Back to payment methods</span>
         </button>
@@ -470,7 +495,9 @@ export class PaymentsController {
     
     const paymentMethods = document.getElementById('paymentMethods');
     const cardFormWrapper = document.getElementById('cardFormWrapper');
+    const walletFormWrapper = document.getElementById('walletFormWrapper');
     const backButton = document.getElementById('backButton');
+    const backFromWalletButton = document.getElementById('backFromWalletButton');
     const contentContainer = document.querySelector('.content-container');
     const paymentAmountEl = document.getElementById('paymentAmount');
     const paymentDescEl = document.getElementById('paymentDesc');
@@ -482,26 +509,22 @@ export class PaymentsController {
     
     // Map payment methods to Pay4Bit paySystem values and paymentType for API
     const paySystemMap = {
-      'google-pay': null,
-      'apple-pay': null,
+      'wallet': null,
       'visa': 'visa',
       'mastercard': 'mastercard'
     };
     const methodToPaymentType = {
-      'google-pay': 'googlepay',
-      'apple-pay': 'applepay',
+      'wallet': 'wallet',
       'visa': 'visa',
       'mastercard': 'mastercard'
     };
     
     // Function to sync container height with active block
     function syncHeight() {
-      const activeEl = cardFormWrapper.classList.contains('active')
-        ? cardFormWrapper
-        : paymentMethods;
-
+      let activeEl = paymentMethods;
+      if (cardFormWrapper.classList.contains('active')) activeEl = cardFormWrapper;
+      else if (walletFormWrapper.classList.contains('active')) activeEl = walletFormWrapper;
       const h = activeEl.scrollHeight;
-      // +10 щоб не було "впритик"
       contentContainer.style.height = (h + 10) + 'px';
     }
     
@@ -527,15 +550,18 @@ export class PaymentsController {
         const paymentType = methodToPaymentType[method];
         if (paymentType) setPaymentTypeOnServer(paymentType);
         
-        if (method === 'google-pay' || method === 'apple-pay') {
-          // Initialize Stripe Payment Request Button for Google Pay / Apple Pay
+        if (method === 'wallet') {
           if (stripe && paymentIntentClientSecret) {
-            initializeWalletPayment(method);
+            paymentMethods.classList.add('hidden');
+            setTimeout(() => {
+              walletFormWrapper.classList.add('active');
+              initializeWalletPayment();
+              syncHeight();
+            }, 150);
           } else {
             alert('Payment system not available');
           }
         } else if (method === 'visa' || method === 'mastercard') {
-          // Hide payment methods and show card form
           paymentMethods.classList.add('hidden');
           setTimeout(() => {
             cardFormWrapper.classList.add('active');
@@ -546,13 +572,21 @@ export class PaymentsController {
       });
     });
     
-    // Handle back button click
+    // Handle back button click (from card form)
     backButton.addEventListener('click', function() {
       cardFormWrapper.classList.remove('active');
       setTimeout(() => {
         paymentMethods.classList.remove('hidden');
-        // Reset form
         document.getElementById('paymentForm').reset();
+        syncHeight();
+      }, 300);
+    });
+    
+    // Handle back button click (from wallet)
+    backFromWalletButton.addEventListener('click', function() {
+      walletFormWrapper.classList.remove('active');
+      setTimeout(() => {
+        paymentMethods.classList.remove('hidden');
         syncHeight();
       }, 300);
     });
@@ -645,33 +679,36 @@ export class PaymentsController {
     }
 
     // Initialize Google Pay / Apple Pay with Express Checkout Element (bound to existing Payment Intent)
-    async function initializeWalletPayment(method) {
+    let walletMounted = false;
+    let walletElements = null;
+    let expressCheckoutElement = null;
+
+    function initializeWalletPayment() {
       if (!stripe || !paymentIntentClientSecret) {
-        alert('Payment system not available');
+        return;
+      }
+      if (walletMounted) {
         return;
       }
 
-      // Bind Elements to our existing Payment Intent so wallet buttons use the same PI
-      const walletElements = stripe.elements({
+      var container = document.getElementById('express-checkout-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'express-checkout-container';
+        container.style.cssText = 'margin-top: 20px; width: 100%;';
+        document.querySelector('.payment-card').appendChild(container);
+      }
+
+      walletElements = stripe.elements({
         clientSecret: paymentIntentClientSecret,
       });
 
-      const expressCheckoutElement = walletElements.create('expressCheckout', {
+      expressCheckoutElement = walletElements.create('expressCheckout', {
         emailRequired: true,
       });
 
-      const container = document.createElement('div');
-      container.id = 'express-checkout-container';
-      container.style.cssText = 'margin-top: 20px; width: 100%;';
-      const cardForm = document.querySelector('.card-form');
-      if (cardForm && cardForm.querySelector('#wallet-payment-container')) {
-        cardForm.querySelector('#wallet-payment-container').remove();
-      }
-      const existingExpress = document.getElementById('express-checkout-container');
-      if (existingExpress) existingExpress.remove();
-      document.querySelector('.payment-card').appendChild(container);
-
       expressCheckoutElement.mount('#express-checkout-container');
+      walletMounted = true;
 
       expressCheckoutElement.on('confirm', async (event) => {
         const { error: submitError } = await walletElements.submit();
