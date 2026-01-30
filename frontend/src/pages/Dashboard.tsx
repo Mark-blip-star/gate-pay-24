@@ -43,6 +43,7 @@ export function DashboardPage() {
   const { user, logout } = useAuth();
   const [items, setItems] = useState<Transaction[]>([]);
   const [balance, setBalance] = useState(0);
+  const [balanceCurrency, setBalanceCurrency] = useState("EUR");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showWithdraw, setShowWithdraw] = useState(false);
@@ -78,6 +79,7 @@ export function DashboardPage() {
       const res = await apiTransactions();
       setItems(res.items);
       setBalance(res.balance);
+      setBalanceCurrency(res.currency ?? "EUR");
     } catch (e: unknown) {
       setError(
         (e as { message?: string })?.message ?? "Failed to load transactions",
@@ -194,7 +196,7 @@ export function DashboardPage() {
                   {user?.email ?? "user"}
                 </div>
                 <div className="text-xs text-white/60">
-                  {formatMoney(balance)} available
+                  {formatMoney(balance, balanceCurrency)} available
                 </div>
               </div>
               <UserCircle2 className="h-4 w-4 text-white/50 sm:hidden" />
@@ -268,11 +270,13 @@ export function DashboardPage() {
                       </td>
                       <td className="px-5 py-4 font-semibold">
                         <span
-                          className={
-                            t.type === "withdraw"
-                              ? "text-amber-200"
-                              : "text-emerald-200"
-                          }
+                          className={cn(
+                            t.type === "withdraw" && "text-amber-200",
+                            t.type === "deposit" &&
+                              (t.status === "canceled" || t.status === "failed")
+                              ? "text-white/50"
+                              : t.type === "deposit" && "text-emerald-200",
+                          )}
                         >
                           {t.type === "withdraw" ? "-" : "+"}
                           {formatMoney(t.amount, t.currency)}
@@ -327,7 +331,7 @@ export function DashboardPage() {
             <div className="mb-4 text-lg font-bold">Withdraw</div>
             <form onSubmit={onWithdraw} className="space-y-4">
               <Input
-                label="Amount (USD)"
+                label="Amount (EUR)"
                 type="number"
                 inputMode="decimal"
                 step="0.01"

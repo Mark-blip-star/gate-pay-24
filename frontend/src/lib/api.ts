@@ -69,7 +69,11 @@ export async function apiMe() {
 }
 
 export async function apiTransactions() {
-  return request<{ items: Transaction[]; balance: number }>("/transactions");
+  return request<{
+    items: Transaction[];
+    balance: number;
+    currency: string;
+  }>("/transactions");
 }
 
 export async function apiWithdraw(amount: number) {

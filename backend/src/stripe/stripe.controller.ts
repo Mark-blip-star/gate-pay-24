@@ -146,6 +146,18 @@ export class StripeController {
         break;
       }
 
+      case 'payment_intent.canceled': {
+        const canceledPayment = event.data.object;
+        await this.prisma.payment.updateMany({
+          where: {
+            stripePaymentIntentId: canceledPayment.id,
+            status: 'pending',
+          },
+          data: { status: 'canceled' },
+        });
+        break;
+      }
+
       default:
         console.log(`Unhandled event type: ${event.type}`);
     }

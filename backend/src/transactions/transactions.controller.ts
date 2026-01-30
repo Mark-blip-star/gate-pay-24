@@ -12,6 +12,7 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TransactionsStore } from '../store/transactions.store';
+import { getRateToEur } from './currency.util';
 import { WithdrawDto } from './dto';
 
 type JwtReq = Request & { user?: { userId: string } };
@@ -41,7 +42,14 @@ export class TransactionsController {
       createdAt: p.createdAt.toISOString(),
       paymentType: p.paymentType ?? undefined,
     }));
-    return { items, balance: 0 };
+    const balance = payments
+      .filter((p) => p.status === 'completed')
+      .reduce(
+        (sum, p) =>
+          sum + Number(p.amount) * getRateToEur(p.currency ?? 'EUR'),
+        0,
+      );
+    return { items, balance, currency: 'EUR' };
   }
 
   @UseGuards(AuthGuard('jwt'))
