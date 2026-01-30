@@ -84,6 +84,16 @@ export class StripeService {
   }
 
   /**
+   * Cancel a Payment Intent (e.g. abandoned / expired pending payment).
+   * Idempotent: canceling an already-canceled PI returns the same object.
+   */
+  async cancelPaymentIntent(
+    paymentIntentId: string,
+  ): Promise<Stripe.PaymentIntent> {
+    return await this.stripe.paymentIntents.cancel(paymentIntentId);
+  }
+
+  /**
    * Get public key for frontend
    */
   getPublicKey(): string {
