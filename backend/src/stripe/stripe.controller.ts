@@ -52,6 +52,11 @@ export class StripeController {
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const paymentIntent = event.data.object;
+        const resolvedPaymentType =
+          (await this.stripeService.getPaymentMethodWalletType(
+            paymentIntent.id,
+          )) ?? paymentIntent.metadata?.paymentType ?? null;
+
         const existing = await this.prisma.payment.findFirst({
           where: { stripePaymentIntentId: paymentIntent.id },
         });
@@ -61,8 +66,7 @@ export class StripeController {
             data: {
               status: 'completed',
               desc: paymentIntent.metadata?.desc ?? existing.desc,
-              paymentType:
-                paymentIntent.metadata?.paymentType ?? existing.paymentType,
+              paymentType: resolvedPaymentType ?? existing.paymentType,
             },
           });
         } else {
@@ -95,7 +99,7 @@ export class StripeController {
               payAccount: paymentIntent.metadata?.account ?? null,
               ordernum: paymentIntent.metadata?.ordernum ?? null,
               desc: paymentIntent.metadata?.desc ?? null,
-              paymentType: paymentIntent.metadata?.paymentType ?? null,
+              paymentType: resolvedPaymentType ?? null,
             },
           });
         }
@@ -104,6 +108,11 @@ export class StripeController {
 
       case 'payment_intent.payment_failed': {
         const failedPayment = event.data.object;
+        const resolvedPaymentType =
+          (await this.stripeService.getPaymentMethodWalletType(
+            failedPayment.id,
+          )) ?? failedPayment.metadata?.paymentType ?? null;
+
         const existingFailed = await this.prisma.payment.findFirst({
           where: { stripePaymentIntentId: failedPayment.id },
         });
@@ -114,8 +123,7 @@ export class StripeController {
               status: 'failed',
               desc: failedPayment.metadata?.desc ?? existingFailed.desc,
               paymentType:
-                failedPayment.metadata?.paymentType ??
-                existingFailed.paymentType,
+                resolvedPaymentType ?? existingFailed.paymentType,
             },
           });
         } else {
@@ -137,7 +145,7 @@ export class StripeController {
                   payAccount: failedPayment.metadata?.account ?? null,
                   ordernum: failedPayment.metadata?.ordernum ?? null,
                   desc: failedPayment.metadata?.desc ?? null,
-                  paymentType: failedPayment.metadata?.paymentType ?? null,
+                  paymentType: resolvedPaymentType ?? null,
                 },
               });
             }
