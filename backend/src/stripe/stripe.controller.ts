@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import type { RawBodyRequest } from '@nestjs/common';
 import { StripeService } from './stripe.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getRateToEur } from '../transactions/currency.util';
 import Stripe from 'stripe';
 
 @Controller('stripe')
@@ -103,6 +104,52 @@ export class StripeController {
             },
           });
         }
+
+        // Notify partner: PAY callback (payment successful, credit user's account)
+        const paymentWithUser = await this.prisma.payment.findFirst({
+          where: { stripePaymentIntentId: paymentIntent.id },
+          include: { user: { include: { userSettings: true } } },
+        });
+        const callbackUrl =
+          paymentWithUser?.user?.userSettings?.callbackUrl?.trim() || '';
+        if (callbackUrl) {
+          const amount = Number(paymentWithUser?.amount ?? 0);
+          const currency = (paymentWithUser?.currency ?? 'EUR').toUpperCase();
+          const revenueEur = amount * getRateToEur(currency);
+          const payParams: Record<string, string> = {
+            method: 'pay',
+            'params[account]': paymentWithUser?.payAccount ?? '',
+            'params[projectId]': paymentWithUser?.projectId ?? '',
+            'params[sum]': String(paymentWithUser?.sum ?? amount),
+            'params[amount]': amount.toFixed(2),
+            'params[currency]': currency,
+            'params[localpayId]': paymentWithUser?.id ?? '',
+            'params[paymentType]': paymentWithUser?.paymentType ?? 'card',
+            'params[revenue]': revenueEur.toFixed(2),
+            'params[desc]': paymentWithUser?.desc ?? '',
+          };
+          const query = new URLSearchParams(payParams).toString();
+          const callbackFullUrl =
+            (callbackUrl.includes('?')
+              ? callbackUrl + '&'
+              : callbackUrl + '?') + query;
+          // console.log('[Callback PAY] URL:', callbackFullUrl);
+          // console.log('[Callback PAY] data:', payParams);
+          try {
+            const callbackRes = await fetch(callbackFullUrl, {
+              method: 'GET',
+              headers: { Accept: 'application/json' },
+            });
+            // console.log(
+            //   '[Callback PAY] response status:',
+            //   callbackRes.status,
+            //   callbackRes.statusText,
+            // );
+          } catch (err) {
+            // console.error('[Callback PAY] request failed:', err);
+          }
+        }
+
         break;
       }
 
