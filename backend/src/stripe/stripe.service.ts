@@ -99,4 +99,28 @@ export class StripeService {
   getPublicKey(): string {
     return this.configService.get<string>('STRIPE_PUBLIC_KEY') || '';
   }
+
+  /**
+   * Resolve actual payment method type from Stripe (e.g. applepay, googlepay)
+   * when payment was made via wallet. Used in webhook to store specific type
+   * instead of generic "wallet".
+   */
+  async getPaymentMethodWalletType(
+    paymentIntentId: string,
+  ): Promise<string | null> {
+    try {
+      const paymentIntent = await this.stripe.paymentIntents.retrieve(
+        paymentIntentId,
+        { expand: ['payment_method'] },
+      );
+      const pm = paymentIntent.payment_method;
+      if (!pm || typeof pm === 'string') return null;
+      const walletType = (pm as Stripe.PaymentMethod).card?.wallet?.type;
+      if (walletType === 'apple_pay') return 'applepay';
+      if (walletType === 'google_pay') return 'googlepay';
+      return null;
+    } catch {
+      return null;
+    }
+  }
 }
