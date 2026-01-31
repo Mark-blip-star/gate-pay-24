@@ -45,6 +45,63 @@ export class PaymentsController {
     res.redirect(303, redirectUrl);
   }
 
+  /**
+   * Stripe redirects here after successful payment (return_url).
+   * Redirects the user to the partner's redirectUrl from DB.
+   */
+  @Get('success')
+  async getPaySuccess(
+    @Query('payment_intent') paymentIntentId: string,
+    @Query('redirect_status') redirectStatus: string,
+    @Res() res: Response,
+  ) {
+    if (!paymentIntentId) {
+      res
+        .status(400)
+        .send(
+          '<!DOCTYPE html><html><body><h1>Bad Request</h1><p>Missing payment_intent.</p></body></html>',
+        );
+      return;
+    }
+    if (redirectStatus !== 'succeeded') {
+      res
+        .status(400)
+        .send(
+          '<!DOCTYPE html><html><body><h1>Payment not completed</h1><p>Redirect status: ' +
+            (redirectStatus || 'unknown') +
+            '</p></body></html>',
+        );
+      return;
+    }
+    const payment = await this.prisma.payment.findFirst({
+      where: { stripePaymentIntentId: paymentIntentId },
+      include: { user: { include: { userSettings: true } } },
+    });
+    const partnerRedirectUrl =
+      payment?.user?.userSettings?.redirectUrl?.trim() || '';
+    if (!partnerRedirectUrl) {
+      res
+        .status(500)
+        .send(
+          '<!DOCTYPE html><html><body><h1>Error</h1><p>Redirect URL not configured.</p></body></html>',
+        );
+      return;
+    }
+    const params = new URLSearchParams();
+    if (payment?.payAccount) params.set('account', payment.payAccount);
+    if (payment?.sum) params.set('sum', payment.sum ?? '');
+    if (payment?.ordernum) params.set('ordernum', payment.ordernum ?? '');
+    if (payment?.amount != null) params.set('amount', String(payment.amount));
+    if (payment?.currency) params.set('currency', payment.currency);
+    const queryString = params.toString();
+    const targetUrl = queryString
+      ? (partnerRedirectUrl.includes('?')
+          ? partnerRedirectUrl + '&'
+          : partnerRedirectUrl + '?') + queryString
+      : partnerRedirectUrl;
+    res.redirect(302, targetUrl);
+  }
+
   @Get()
   async getPaymentPage(
     @Query() query: PaymentQueryDto,
@@ -73,6 +130,7 @@ export class PaymentsController {
     }
     const userByPublicKey = await this.prisma.user.findUnique({
       where: { publicKey: params.public_key },
+      include: { userSettings: true },
     });
     if (!userByPublicKey) {
       res
@@ -83,13 +141,24 @@ export class PaymentsController {
       return;
     }
 
+    const callbackUrl = userByPublicKey.userSettings?.callbackUrl?.trim() || '';
+    const redirectUrl = userByPublicKey.userSettings?.redirectUrl?.trim() || '';
+    if (!callbackUrl || !redirectUrl) {
+      res
+        .status(400)
+        .send(
+          '<!DOCTYPE html><html><body><h1>Bad Request</h1><p>Redirect URL and Callback URL must both be configured in account settings.</p></body></html>',
+        );
+      return;
+    }
+
     // Create Stripe Payment Intent for card payments
     const amount = parseFloat(params.sum) || 0;
     const currency = params.currency || 'EUR';
 
     const protocol = req.protocol || 'http';
     const host = req.get('host') || 'localhost:3000';
-    const returnUrl = protocol + '://' + host + '/pay?success=1';
+    const returnUrl = protocol + '://' + host + '/pay/success';
 
     let paymentIntentClientSecret = '';
     let paymentIntentId = '';
@@ -795,7 +864,8 @@ export class PaymentsController {
         }
         alert('Payment failed: ' + error.message);
       } else if (paymentIntent && paymentIntent.status === 'succeeded') {
-        alert('Payment successful!');
+        var successUrl = paymentReturnUrl + '?payment_intent=' + encodeURIComponent(paymentIntent.id) + '&redirect_status=succeeded';
+        window.location.href = successUrl;
       }
     });
     
