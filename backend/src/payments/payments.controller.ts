@@ -729,6 +729,11 @@ export class PaymentsController {
       });
     }
 
+    // Mount Express Checkout on page load (in hidden wrapper) so Wallet view opens instantly when clicked
+    if (stripe && paymentIntentClientSecret) {
+      initializeWalletPayment();
+    }
+
     // Handle form submission with Stripe
     document.getElementById('paymentForm').addEventListener('submit', async function(e) {
       e.preventDefault();
