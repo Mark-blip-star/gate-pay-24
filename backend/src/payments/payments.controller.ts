@@ -239,30 +239,42 @@ export class PaymentsController {
     
     .card-form-wrapper {
       position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
+      z-index: 1;
       opacity: 0;
+      visibility: hidden;
       transform: translateX(20px);
       pointer-events: none;
-      transition: opacity 0.3s, transform 0.3s;
+      transition: opacity 0.3s, transform 0.3s, visibility 0.3s;
     }
     
     .card-form-wrapper.active {
+      z-index: 10;
       opacity: 1;
+      visibility: visible;
       transform: translateX(0);
       pointer-events: all;
     }
     
     .wallet-form-wrapper {
       position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
+      z-index: 1;
       opacity: 0;
+      visibility: hidden;
       transform: translateX(20px);
       pointer-events: none;
-      transition: opacity 0.3s, transform 0.3s;
+      transition: opacity 0.3s, transform 0.3s, visibility 0.3s;
     }
     
     .wallet-form-wrapper.active {
+      z-index: 10;
       opacity: 1;
+      visibility: visible;
       transform: translateX(0);
       pointer-events: all;
     }
@@ -531,6 +543,19 @@ export class PaymentsController {
     // Call on startup
     syncHeight();
     window.addEventListener('resize', syncHeight);
+    
+    // When Express Checkout iframe resizes (e.g. after first load), update container height
+    var resizeRaf = null;
+    var walletResizeObserver = typeof ResizeObserver !== 'undefined' && new ResizeObserver(function() {
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(function() {
+        resizeRaf = null;
+        syncHeight();
+      });
+    });
+    if (walletResizeObserver && walletFormWrapper) {
+      walletResizeObserver.observe(walletFormWrapper);
+    }
     
     // Notify server of selected payment type (for metadata and DB)
     function setPaymentTypeOnServer(paymentType) {
