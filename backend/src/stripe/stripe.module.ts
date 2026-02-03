@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
-import { StripeService } from './stripe.service';
+import { CallbackQueueModule } from '../callback-queue/callback-queue.module';
 import { StripeController } from './stripe.controller';
+import { StripeService } from './stripe.service';
 
 @Module({
+  imports: [CallbackQueueModule],
   providers: [StripeService],
   controllers: [StripeController],
   exports: [StripeService],
