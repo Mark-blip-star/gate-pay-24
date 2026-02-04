@@ -58,3 +58,12 @@ model Payment {
   @@index([stripePaymentIntentId])
   @@index([localpayId])
 }
+
+model ProcessedStripeEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  processedAt DateTime @default(now())
+
+  @@index([eventId])
+  @@map("processedStripeEvent")
+}

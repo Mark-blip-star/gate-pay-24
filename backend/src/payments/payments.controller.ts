@@ -7,6 +7,7 @@ import {
 } from './dto';
 import { StripeService } from '../stripe/stripe.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getRateToEur } from '../transactions/currency.util';
 
 @Controller('pay')
 export class PaymentsController {
@@ -175,7 +176,7 @@ export class PaymentsController {
       );
       paymentIntentClientSecret = paymentIntent.client_secret || '';
       paymentIntentId = paymentIntent.id;
-      await this.prisma.payment.create({
+      const createdPayment = await this.prisma.payment.create({
         data: {
           userId: userByPublicKey.id,
           stripePaymentIntentId: paymentIntent.id,
@@ -187,6 +188,38 @@ export class PaymentsController {
           desc: params.desc || null,
         },
       });
+      if (callbackUrl) {
+        const revenueEur = amount * getRateToEur(currency);
+        const checkParams: Record<string, string> = {
+          method: 'check',
+          'params[account]': params.account || '',
+          'params[projectId]': '',
+          'params[sum]': params.sum || amount.toFixed(2),
+          'params[amount]': amount.toFixed(2),
+          'params[currency]': currency.toUpperCase(),
+          'params[localpayId]': createdPayment.id,
+          'params[paymentType]': '',
+          'params[revenue]': revenueEur.toFixed(2),
+          'params[desc]': params.desc || '',
+        };
+        const checkFiltered = Object.fromEntries(
+          Object.entries(checkParams).filter(
+            ([, v]) => v != null && String(v).trim() !== '',
+          ),
+        );
+        const checkQuery = new URLSearchParams(checkFiltered).toString();
+        const checkUrl =
+          (callbackUrl.includes('?') ? callbackUrl + '&' : callbackUrl + '?') +
+          checkQuery;
+        try {
+          await fetch(checkUrl, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+        } catch {
+          // non-blocking; page still renders
+        }
+      }
     } catch (error) {
       console.error('Failed to create Payment Intent:', error);
     }
@@ -799,6 +832,11 @@ export class PaymentsController {
 
       expressCheckoutElement = walletElements.create('expressCheckout', {
         emailRequired: true,
+        paymentMethods: {
+          applePay: 'always',
+          googlePay: 'always',
+          link: 'never',
+        },
       });
 
       expressCheckoutElement.mount('#express-checkout-container');

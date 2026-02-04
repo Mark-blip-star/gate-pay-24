@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { MeController } from './me/me.controller';
+import { CallbackQueueModule } from './callback-queue/callback-queue.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StripeModule } from './stripe/stripe.module';
@@ -19,6 +20,7 @@ import { TransactionsController } from './transactions/transactions.controller';
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
+    CallbackQueueModule,
     PaymentsModule,
     StripeModule,
   ],
