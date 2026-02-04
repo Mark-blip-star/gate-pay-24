@@ -832,6 +832,11 @@ export class PaymentsController {
 
       expressCheckoutElement = walletElements.create('expressCheckout', {
         emailRequired: true,
+        paymentMethods: {
+          applePay: 'always',
+          googlePay: 'always',
+          link: 'never',
+        },
       });
 
       expressCheckoutElement.mount('#express-checkout-container');
