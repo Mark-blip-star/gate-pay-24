@@ -1,4 +1,4 @@
-import { Controller, Post, Req, Res, Headers } from '@nestjs/common';
+import { Controller, Post, Req, Res, Headers, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { RawBodyRequest } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -10,8 +10,18 @@ import { CALLBACK_QUEUE_NAME } from '../callback-queue/callback-queue.processor'
 import type { CallbackJobPayload } from '../callback-queue/callback-job.payload';
 import Stripe from 'stripe';
 
+function callbackHost(callbackUrl: string): string {
+  try {
+    return new URL(callbackUrl).hostname;
+  } catch {
+    return '(invalid url)';
+  }
+}
+
 @Controller('stripe')
 export class StripeController {
+  private readonly logger = new Logger(StripeController.name);
+
   constructor(
     private readonly stripeService: StripeService,
     private readonly prisma: PrismaService,
@@ -47,13 +57,19 @@ export class StripeController {
 
       event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
     } catch (err) {
-      console.error('Webhook signature verification failed:', err);
+      this.logger.warn(
+        `Webhook signature verification failed: ${err instanceof Error ? err.message : 'Unknown'}`,
+      );
       return res
         .status(400)
         .send(
           `Webhook Error: ${err instanceof Error ? err.message : 'Unknown'}`,
         );
     }
+
+    this.logger.log(
+      `Stripe webhook received: type=${event.type} id=${event.id}`,
+    );
 
     // Handle the event (idempotent: each event.id processed at most once)
     switch (event.type) {
@@ -86,7 +102,7 @@ export class StripeController {
             } else {
               const publicKey = paymentIntent.metadata?.public_key;
               if (!publicKey) {
-                console.warn(
+                this.logger.warn(
                   'payment_intent.succeeded: missing metadata.public_key',
                 );
                 throw new Error('missing metadata.public_key');
@@ -95,9 +111,8 @@ export class StripeController {
                 where: { publicKey },
               });
               if (!user) {
-                console.warn(
+                this.logger.warn(
                   'payment_intent.succeeded: no user for public_key',
-                  publicKey,
                 );
                 throw new Error('no user for public_key');
               }
@@ -124,10 +139,17 @@ export class StripeController {
               ? (err as { code: string }).code
               : undefined;
           if (code === 'P2002') {
+            this.logger.log(
+              `Stripe event already processed (idempotent skip): id=${event.id}`,
+            );
             return res.status(200).json({ received: true });
           }
           throw err;
         }
+
+        this.logger.log(
+          `Payment intent succeeded processed: pi=${paymentIntent.id} type=${resolvedPaymentType ?? 'n/a'}`,
+        );
 
         // Notify partner: PAY callback (via queue with retries; fallback to immediate fetch if Redis down)
         const paymentWithUser = await this.prisma.payment.findFirst({
@@ -163,7 +185,13 @@ export class StripeController {
               callbackUrl,
               params: payFiltered,
             });
+            this.logger.log(
+              `Callback queued: method=pay paymentId=${paymentWithUser?.id} host=${callbackHost(callbackUrl)}`,
+            );
           } catch {
+            this.logger.log(
+              `Callback queue unavailable, sending immediately: method=pay paymentId=${paymentWithUser?.id} host=${callbackHost(callbackUrl)}`,
+            );
             const query = new URLSearchParams(payFiltered).toString();
             const callbackFullUrl =
               (callbackUrl.includes('?')
@@ -238,10 +266,17 @@ export class StripeController {
               ? (err as { code: string }).code
               : undefined;
           if (code === 'P2002') {
+            this.logger.log(
+              `Stripe event already processed (idempotent skip): id=${event.id}`,
+            );
             return res.status(200).json({ received: true });
           }
           throw err;
         }
+
+        this.logger.log(
+          `Payment intent failed processed: pi=${failedPayment.id}`,
+        );
 
         // Notify partner: ERROR callback (payment failed)
         const failedWithUser = await this.prisma.payment.findFirst({
@@ -278,7 +313,13 @@ export class StripeController {
               callbackUrl: errorCallbackUrl,
               params: errorFiltered,
             });
+            this.logger.log(
+              `Callback queued: method=error paymentId=${failedWithUser?.id} host=${callbackHost(errorCallbackUrl)}`,
+            );
           } catch {
+            this.logger.log(
+              `Callback queue unavailable, sending immediately: method=error paymentId=${failedWithUser?.id} host=${callbackHost(errorCallbackUrl)}`,
+            );
             const errorQuery = new URLSearchParams(errorFiltered).toString();
             const errorFullUrl =
               (errorCallbackUrl.includes('?')
@@ -315,15 +356,21 @@ export class StripeController {
               ? (err as { code: string }).code
               : undefined;
           if (code === 'P2002') {
+            this.logger.log(
+              `Stripe event already processed (idempotent skip): id=${event.id}`,
+            );
             return res.status(200).json({ received: true });
           }
           throw err;
         }
+        this.logger.log(
+          `Payment intent canceled processed: pi=${canceledPayment.id}`,
+        );
         break;
       }
 
       default:
-        console.log(`Unhandled event type: ${event.type}`);
+        this.logger.log(`Unhandled Stripe event type: ${event.type}`);
     }
 
     res.json({ received: true });

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Cron } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
@@ -7,6 +7,14 @@ import type { CallbackJobPayload } from '../callback-queue/callback-job.payload'
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from '../stripe/stripe.service';
 import { getRateToEur } from '../transactions/currency.util';
+
+function callbackHost(callbackUrl: string): string {
+  try {
+    return new URL(callbackUrl).hostname;
+  } catch {
+    return '(invalid url)';
+  }
+}
 
 /** Advisory lock id: only one instance runs the expire job at a time */
 const EXPIRE_LOCK_ID = 0x65787069; // "expi" in hex
@@ -17,6 +25,8 @@ const BATCH_SIZE = 100;
 
 @Injectable()
 export class PendingPaymentsExpireService {
+  private readonly logger = new Logger(PendingPaymentsExpireService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
@@ -43,6 +53,8 @@ export class PendingPaymentsExpireService {
       return;
     }
 
+    this.logger.log('Pending payments sync/expire job started (lock acquired)');
+
     const cutoff = new Date(Date.now() - PENDING_EXPIRE_MINUTES * 60 * 1000);
 
     try {
@@ -64,9 +76,8 @@ export class PendingPaymentsExpireService {
         try {
           pi = await this.stripeService.getPaymentIntent(piId);
         } catch (err) {
-          console.error(
-            `[PendingPaymentsExpire] Failed to retrieve PI ${piId}:`,
-            err,
+          this.logger.warn(
+            `Failed to retrieve PI from Stripe: pi=${piId} error=${err instanceof Error ? err.message : 'Unknown'}`,
           );
           continue;
         }
@@ -74,6 +85,9 @@ export class PendingPaymentsExpireService {
         const status = pi.status;
 
         if (status === 'succeeded') {
+          this.logger.log(
+            `Stripe sync: payment ${row.id} pi=${piId} status=succeeded → completed`,
+          );
           const resolvedPaymentType =
             (await this.stripeService.getPaymentMethodWalletType(piId)) ??
             pi.metadata?.paymentType ??
@@ -94,6 +108,9 @@ export class PendingPaymentsExpireService {
         }
 
         if (status === 'canceled') {
+          this.logger.log(
+            `Stripe sync: payment ${row.id} pi=${piId} status=canceled`,
+          );
           await this.prisma.payment.updateMany({
             where: { id: row.id, status: 'pending' },
             data: { status: 'canceled' },
@@ -105,6 +122,9 @@ export class PendingPaymentsExpireService {
         if (row.createdAt >= cutoff) {
           continue;
         }
+        this.logger.log(
+          `Stripe sync: payment ${row.id} pi=${piId} expired (old) → canceling`,
+        );
         try {
           await this.stripeService.cancelPaymentIntent(piId);
           await this.prisma.payment.updateMany({
@@ -119,9 +139,8 @@ export class PendingPaymentsExpireService {
           if (code === 'payment_intent_unexpected_state') {
             continue;
           }
-          console.error(
-            `[PendingPaymentsExpire] Failed to cancel PI ${piId}:`,
-            err,
+          this.logger.warn(
+            `Failed to cancel PI: pi=${piId} error=${err instanceof Error ? err.message : 'Unknown'}`,
           );
         }
       }
@@ -178,7 +197,13 @@ export class PendingPaymentsExpireService {
         callbackUrl,
         params: payFiltered,
       });
+      this.logger.log(
+        `Callback queued (cron): method=pay paymentId=${payment.id} host=${callbackHost(callbackUrl)}`,
+      );
     } catch {
+      this.logger.log(
+        `Callback queue unavailable (cron), sending immediately: method=pay paymentId=${payment.id} host=${callbackHost(callbackUrl)}`,
+      );
       const query = new URLSearchParams(payFiltered).toString();
       const callbackFullUrl =
         (callbackUrl.includes('?') ? callbackUrl + '&' : callbackUrl + '?') +
