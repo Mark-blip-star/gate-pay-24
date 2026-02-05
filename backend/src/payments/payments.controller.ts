@@ -537,9 +537,13 @@ export class PaymentsController {
     
     <div class="content-container">
       <div class="payment-methods" id="paymentMethods">
-        <div class="payment-tile" data-method="wallet">
-          <img src="/icons/wallet.png" alt="Wallet">
-          <span>Wallet</span>
+        <div class="payment-tile" data-method="applepay">
+          <img src="/icons/apple-logo.png" alt="Apple Pay">
+          <span>Apple Pay</span>
+        </div>
+        <div class="payment-tile" data-method="googlepay">
+          <img src="/icons/google-pay.png" alt="Google Pay">
+          <span>Google Pay</span>
         </div>
         <div class="payment-tile" data-method="visa">
           <img src="/icons/visa.png" alt="Visa">
@@ -623,12 +627,14 @@ export class PaymentsController {
     
     // Map payment methods to Pay4Bit paySystem values and paymentType for API
     const paySystemMap = {
-      'wallet': null,
+      'applepay': null,
+      'googlepay': null,
       'visa': 'visa',
       'mastercard': 'mastercard'
     };
     const methodToPaymentType = {
-      'wallet': 'wallet',
+      'applepay': 'applepay',
+      'googlepay': 'googlepay',
       'visa': 'visa',
       'mastercard': 'mastercard'
     };
@@ -677,12 +683,12 @@ export class PaymentsController {
         const paymentType = methodToPaymentType[method];
         if (paymentType) setPaymentTypeOnServer(paymentType);
         
-        if (method === 'wallet') {
+        if (method === 'applepay' || method === 'googlepay') {
           if (stripe && paymentIntentClientSecret) {
             paymentMethods.classList.add('hidden');
             setTimeout(() => {
               walletFormWrapper.classList.add('active');
-              initializeWalletPayment();
+              initializeWalletPayment(method);
               syncHeight();
             }, 150);
           } else {
@@ -805,17 +811,28 @@ export class PaymentsController {
       form.appendChild(submitBtnContainer);
     }
 
-    // Initialize Google Pay / Apple Pay with Express Checkout Element (bound to existing Payment Intent)
-    let walletMounted = false;
+    // Initialize Apple Pay or Google Pay with Express Checkout (one method per tile)
+    let walletMountedMethod = null;
     let walletElements = null;
     let expressCheckoutElement = null;
 
-    function initializeWalletPayment() {
+    function initializeWalletPayment(walletMethod) {
       if (!stripe || !paymentIntentClientSecret) {
         return;
       }
-      if (walletMounted) {
+      if (walletMethod !== 'applepay' && walletMethod !== 'googlepay') {
         return;
+      }
+      if (walletMountedMethod === walletMethod) {
+        return;
+      }
+      if (expressCheckoutElement) {
+        try {
+          expressCheckoutElement.unmount();
+        } catch (e) {}
+        expressCheckoutElement = null;
+        walletElements = null;
+        walletMountedMethod = null;
       }
 
       var container = document.getElementById('express-checkout-container');
@@ -825,22 +842,25 @@ export class PaymentsController {
         container.style.cssText = 'margin-top: 20px; width: 100%;';
         document.querySelector('.payment-card').appendChild(container);
       }
+      container.innerHTML = '';
 
       walletElements = stripe.elements({
         clientSecret: paymentIntentClientSecret,
       });
 
+      var paymentMethodsOpt = {
+        link: 'never',
+        applePay: walletMethod === 'applepay' ? 'always' : 'never',
+        googlePay: walletMethod === 'googlepay' ? 'always' : 'never',
+      };
+
       expressCheckoutElement = walletElements.create('expressCheckout', {
         emailRequired: true,
-        paymentMethods: {
-          applePay: 'always',
-          googlePay: 'always',
-          link: 'never',
-        },
+        paymentMethods: paymentMethodsOpt,
       });
 
       expressCheckoutElement.mount('#express-checkout-container');
-      walletMounted = true;
+      walletMountedMethod = walletMethod;
 
       expressCheckoutElement.on('confirm', async (event) => {
         const { error: submitError } = await walletElements.submit();
@@ -861,10 +881,7 @@ export class PaymentsController {
       });
     }
 
-    // Mount Express Checkout on page load (in hidden wrapper) so Wallet view opens instantly when clicked
-    if (stripe && paymentIntentClientSecret) {
-      initializeWalletPayment();
-    }
+    // Express Checkout is mounted only when user clicks Apple Pay or Google Pay tile
 
     // Handle form submission with Stripe
     document.getElementById('paymentForm').addEventListener('submit', async function(e) {
